@@ -170,9 +170,55 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         )
         return session
 
-    # TODO: delete these two lines and build the rest of the loop (search_listings onward).
-    session["error"] = "The planning loop isn't built yet — see the TODO in agent.py."
+    steps = 0
+
+    # Step 1 — search. Inputs come out of the session, results go back in.
+    steps += 1
+    trace.check_iterations(steps)
+    parsed = session["parsed"]
+    session["search_results"] = search_listings(
+        parsed["description"], size=parsed["size"], max_price=parsed["max_price"]
+    )
+
+    # THE BRANCH: nothing matched, so stop before suggest_outfit.
+    if not session["search_results"]:
+        session["error"] = _no_results_message(parsed)
+        return session
+
+    session["selected_item"] = session["search_results"][0]
+
+    # Step 2 — outfit, built from the item stored in the session.
+    steps += 1
+    trace.check_iterations(steps)
+    session["outfit_suggestion"] = suggest_outfit(
+        session["selected_item"], session["wardrobe"]
+    )
+
+    # Step 3 — fit card, from the outfit and item stored in the session.
+    steps += 1
+    trace.check_iterations(steps)
+    session["fit_card"] = create_fit_card(
+        session["outfit_suggestion"], session["selected_item"]
+    )
+
     return session
+
+
+def _no_results_message(parsed: dict) -> str:
+    """Say what was searched and which constraint to loosen first."""
+    searched = f"'{parsed['description']}'"
+    if parsed["size"]:
+        searched += f" in size {parsed['size']}"
+    if parsed["max_price"] is not None:
+        searched += f" under ${parsed['max_price']:g}"
+
+    tips = []
+    if parsed["max_price"] is not None:
+        tips.append("raise or drop the price limit")
+    if parsed["size"]:
+        tips.append("drop the size")
+    tips.append("use fewer or broader words (e.g. 'dress' instead of 'designer ballgown')")
+    return f"Nothing matched {searched}. Try: " + "; ".join(tips) + "."
 
 
 # ── running it directly ───────────────────────────────────────────────────────
