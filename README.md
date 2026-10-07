@@ -157,6 +157,37 @@ $ python -c "from tools import create_fit_card; ..."
 - *What came back:*
 - *What I changed:*
 
+---
+
+## Stretch Feature — A Second Branch
+
+**Declared before building.** This section was committed before any code for
+the branch existed.
+
+**The condition:** after the query is parsed, the size and price are taken out
+of it. If no description words are left (e.g. `'under $30 size M'`), the user
+never said *what* they want, so there is nothing to search for.
+
+**The rule:** If the parsed description is empty, put a message in
+`session["error"]` asking what kind of item they're looking for and stop
+*before* calling `search_listings`. Otherwise, continue to `search_listings`
+as normal.
+
+**How it differs from the empty-search branch:** the empty-search branch stops
+*after* `search_listings` returns `[]`. This one stops *before* any tool is
+called, so `session["search_results"]` stays `[]` and `session["selected_item"]`,
+`session["outfit_suggestion"]` and `session["fit_card"]` all stay `None`.
+
+**Where it lives:** `agent.py::run_agent`
+
+**What it changed:** <!-- fill in after building -->
+
+**Run log where the branch was taken:** <!-- fill in after building -->
+
+```
+
+```
+
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
      Don't fill these in during unit 3.
