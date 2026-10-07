@@ -29,6 +29,12 @@ tool calls and returns a fit card — in at least 4 of 5 tries.
      "my search is a plain keyword match and some phrasings will miss" is a
      real answer. -->
 
+My search is a plain keyword match on words in the title, tags and
+description, with no synonyms — a phrasing like "band shirt" won't score
+against listings titled "tee", so some real matches will be missed. Both later
+tools also call the model, and a rate-limit wait or a failed call can end a run
+early, which 5 of 5 wouldn't allow for.
+
 ---
 
 ## 2. An impossible query stops before the second tool
@@ -39,6 +45,11 @@ Given a query that matches no listings, the agent stops before calling
 **Why this target:**
 <!-- Why is 5 of 5 reasonable here when criterion 1 isn't? What's different
      about this path? -->
+
+This path never touches the model: `parse_query` is regex, `search_listings` is
+pure Python over a fixed file, and `run_agent` checks `if not
+session["search_results"]` before `suggest_outfit` can run. Nothing on it is
+random, so a single miss means the branch is broken — not unlucky.
 
 ---
 
@@ -54,11 +65,20 @@ Given a query that matches no listings, the agent stops before calling
      compares session["selected_item"] against what actually reached
      suggest_outfit is the shape you're after. -->
 
-
+Run each of the five matching queries from `python app.py examples` once and
+print the session. In 5 of 5 runs, `session["selected_item"]["id"]` equals
+`session["search_results"][0]["id"]`, **and** the fit card names that same
+item — at least one distinctive word from its `title` (e.g. "track jacket",
+"501") and its `platform` appear in `session["fit_card"]`.
 
 **Why this target:**
 
-
+`suggest_outfit` and `create_fit_card` both read the item out of
+`session["selected_item"]` instead of from each other's return values, so the id
+check should never fail — if it does, the session is being overwritten. The
+fit-card half catches the model describing an item it wasn't given. I kept it at
+5 of 5 because the prompt hands the model the exact title and platform, so a
+card about a different item would be a real bug, not wording variation.
 
 ---
 
@@ -75,11 +95,18 @@ Given a query that matches no listings, the agent stops before calling
      sentence? A card longer than a caption anyone would post? Any of those can
      be turned into a number. -->
 
-
+Run each of the five matching queries from `python app.py examples` once. In at
+least 4 of the 5 fit cards, the price is written in digits after a `$` sign and
+equals the selected item's `price` (`$24` and `$24.00` both count;
+"twenty-four bucks" or no price at all does not).
 
 **Why this target:**
 
-
+The fit card runs at temperature 0.9 and the model writes casual captions, so
+it sometimes spells prices out — in my own Milestone 4 test, one of three cards
+for the same Levi's said "thirty-eight bucks" instead of "$38". The prompt does
+ask for the price as `$38`, so most cards should get it right, but 5 of 5 would
+ignore a failure I have already seen happen.
 
 ---
 
@@ -92,11 +119,21 @@ Given a query that matches no listings, the agent stops before calling
      search respects a price ceiling — anything, as long as it names a number
      or an observable outcome. -->
 
-
+Run these five queries, which name a size or price but no item: `'under $30 size
+M'`, `'size W30'`, `'looking for something under $20'`, `'anything in size S'`,
+`'cheap stuff under $10'`. In at least 4 of 5, the agent stops **before**
+`search_listings` with the message asking what kind of item they want,
+`session["search_results"]` is `[]`, and the run makes 0 model calls.
 
 **Why this target:**
 
-
+This is my stretch branch. `parse_query` decides there's "no item" by stripping
+words on a hand-written filler list (`looking`, `for`, `something`…). Words
+like "anything", "cheap" or "stuff" aren't on that list, so a query using them
+gets sent to search as if it were a description and falls into the
+empty-search branch instead — the user gets a less useful message. 4 of 5
+allows for one phrasing my list doesn't cover; 5 of 5 would assume the list is
+complete, and I know it isn't.
 
 ---
 
