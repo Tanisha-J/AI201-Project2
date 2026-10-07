@@ -180,12 +180,40 @@ called, so `session["search_results"]` stays `[]` and `session["selected_item"]`
 
 **Where it lives:** `agent.py::run_agent`
 
-**What it changed:** <!-- fill in after building -->
+**What it changed:** `agent.py` gained `parse_query()`, a regex parser that
+pulls `max_price` ("under $30") and `size` ("size M") out of the query and
+drops filler words ("looking for", "something", "a"…). Whatever is left is
+`session["parsed"]["description"]`. `run_agent()` now checks that description
+right after parsing: if it's empty, the run stops with a message that names
+what was kept (size, price) and what to add (an item, with examples). The loop
+now has three possible endings instead of two: stop before search, stop after
+an empty search, or run all three tools.
 
-**Run log where the branch was taken:** <!-- fill in after building -->
+**Run log where the branch was taken:**
 
 ```
+$ python app.py ask 'under $30 size M'
 
+  Your search doesn't say what kind of item you want, so there was nothing to search for. I kept size M and under $30. Add an item and try again — e.g. 'graphic tee', 'denim jacket' or 'platform sneakers'.
+
+0 model calls this session
+
+$ python app.py ask 'looking for something under $20'
+
+  Your search doesn't say what kind of item you want, so there was nothing to search for. I kept under $20. Add an item and try again — e.g. 'graphic tee', 'denim jacket' or 'platform sneakers'.
+
+0 model calls this session
+```
+
+Session after `run_agent('under $30 size M', get_example_wardrobe())` — no
+tool ran, so nothing past `parsed` was filled in:
+
+```
+parsed: {'description': '', 'size': 'M', 'max_price': 30.0}
+search_results: []
+selected_item: None
+outfit_suggestion: None
+fit_card: None
 ```
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
