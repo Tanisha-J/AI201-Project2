@@ -202,15 +202,15 @@ Can't write a fit card without an outfit — suggest_outfit returned nothing.
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- i needed to put my API key in the .env file
+- i put it in the wrong file
+- it put it in an untracked file so it is not leaked and told me the issue
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- i asked for help with framing the criterion
+- it gave me ideas with a sentence frame
+- i changed the wording
 
 ---
 
