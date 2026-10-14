@@ -35,18 +35,33 @@ SCENARIOS = [
         "wardrobe": "empty",
         "criterion": None,
     },
-    # TODO: add what your criteria 3, 4 and 5 need.
-    #
-    # Set "criterion" to the number in criteria.md that the scenario tests.
-    # "criterion": None means a diagnostic run — useful to have, but it isn't
-    # one of your five, and run_eval.py marks it as such in the table.
-    #
-    # For a state criterion, any normal query works — what you're checking is
-    # what ends up in the session, not what the user typed.
-    #
-    # For a fit-card criterion, you probably want the SAME query listed more
-    # than once, or several different items, depending on what your criterion
-    # actually says.
+    # Criteria 3 and 4 both say "run each of the five matching queries from
+    # `python app.py examples` once" — so these five scenarios are scored for
+    # both. Try k in the README table is query k; the repeats show whether
+    # the result holds when the same query runs again.
+    {"name": "state: vintage graphic tee",  "query": "vintage graphic tee under $30",
+     "wardrobe": "example", "criterion": "3+4"},
+    {"name": "state: 90s track jacket",     "query": "90s track jacket in size M",
+     "wardrobe": "example", "criterion": "3+4"},
+    {"name": "state: silk slip dress",      "query": "silk slip dress in midi length under $40",
+     "wardrobe": "example", "criterion": "3+4"},
+    {"name": "state: platform sneakers",    "query": "platform sneakers size 8",
+     "wardrobe": "example", "criterion": "3+4"},
+    {"name": "state: denim jacket",         "query": "denim jacket under $50",
+     "wardrobe": "example", "criterion": "3+4"},
+
+    # Criterion 5 — the five no-item queries, word for word from criteria.md.
+    # Try k in the README table is query k.
+    {"name": "no item: under $30 size M",       "query": "under $30 size M",
+     "wardrobe": "example", "criterion": 5},
+    {"name": "no item: size W30",               "query": "size W30",
+     "wardrobe": "example", "criterion": 5},
+    {"name": "no item: something under $20",    "query": "looking for something under $20",
+     "wardrobe": "example", "criterion": 5},
+    {"name": "no item: anything in size S",     "query": "anything in size S",
+     "wardrobe": "example", "criterion": 5},
+    {"name": "no item: cheap stuff under $10",  "query": "cheap stuff under $10",
+     "wardrobe": "example", "criterion": 5},
 ]
 
 WARDROBES = ("example", "empty")
