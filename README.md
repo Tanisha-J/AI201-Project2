@@ -280,61 +280,156 @@ fit_card: None
 
 ## Run Log — Before
 
-<!-- Five criteria, five tries each, in this exact format.
+Full output: [`results/run_2026-10-13_2242_before.md`](results/run_2026-10-13_2242_before.md),
+produced by `run_eval.py::main` with caching off, temperature 0.9.
 
-     Five, because your criteria are written out of five. Mark each try PASS
-     or FAIL, count the passes, and read that count against your target — a
-     row targeting 4 of 5 with three PASS cells is MISSED (3/5).
-
-     `python run_eval.py --label before` runs everything and writes the table
-     into results/. Paste it here and fill in the verdicts. -->
+**What a "try" is.** Criteria 1 and 2 name one query, so Try *k* is the *k*-th
+run of that query. Criteria 3, 4 and 5 are written as "run each of five queries
+once", so Try *k* is query *k* (in the order `criteria.md` and
+`app.py examples` list them), scored from its first run. `run_eval.py` ran each
+of those queries five times anyway; the repeat count is in the last column so
+the verdict isn't resting on one lucky round.
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before `suggest_outfit` | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Selected item = first search result, and the fit card names its title and platform | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) — 25/25 across all repeats |
+| 4. Fit card has the right price as `$N` | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) — 24/25 across all repeats |
+| 5. No-item query stops before `search_listings` | 4 of 5 | PASS | PASS | PASS | FAIL | FAIL | MISSED (3/5) — 15/25 across all repeats |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+**Real output from one try per criterion** (all from `agent.py::run_agent`; the
+fit cards come from `tools.py::create_fit_card`, the stop messages from
+`agent.py::_no_results_message` and the no-item branch in `run_agent`):
+
+Criterion 1 — `vintage graphic tee under $30`, try 2, fit card:
 
 ```
+scored this 2003 tour bootleg tee on depop for just $24 and it's officially my new uniform. obsessed with how easy it is to dress up with khakis or keep totally chill with baggy denim. the ultimate grunge streetwear piece.
+```
 
+Criterion 2 — `designer ballgown size XXS under $5`, try 1:
+
+```
+- stopped early: yes — Nothing matched 'designer ballgown' in size XXS under $5. Try: raise or drop the price limit; drop the size; use fewer or broader words (e.g. 'dress' instead of 'designer ballgown').
+- selected_item: (none)
+- search_results: 0
+
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      out: [] (empty)
+[3] branch
+      →    search returned [] — stopping before suggest_outfit
+```
+
+Criterion 3 — `90s track jacket in size M`, try 1. The first search result,
+the selected item and the fit card are all the same jacket (`lst_004`):
+
+```
+[2] search_listings (via MCP)
+      out: 5 items: 90s Track Jacket — Navy/White Stripe, 90s Leather Bomber — Black, 90s Silk Slip Dress — Floral, Midi Length … +2 more
+[3] select item
+      out: 90s Track Jacket — Navy/White Stripe ($45.0, poshmark)
+      →    id lst_004 stored in session['selected_item']
+
+Fit card:
+Found this vintage Champion 90s track jacket on Poshmark for just $45 and I'm obsessed. The navy and white stripes give off the ultimate retro-athletic streetwear vibe. Already planning to wear it with baggy jeans and wide-leg trousers on repeat.
+```
+
+Criterion 4 — `denim jacket under $50`, try 1 (price is $42), fit card:
+
+```
+Score! Snagged this cropped vintage Wrangler denim jacket on Poshmark for just $42 and I am obsessed. The light wash gives it such a good streetwear vibe. Can't decide if I want to style it with wide-leg trousers or go full double-denim today!
+```
+
+…and the one card out of 25 that missed — `silk slip dress in midi length under $40`, repeat 3 (price is $30):
+
+```
+Obsessed with this 90s floral silk slip dress I just scored on depop for only thirty bucks. It’s giving total grunge romance when I layer it with a chunky crewneck and combat boots. Such a versatile vintage find!
+```
+
+Criterion 5 — the two failing queries. `anything in size S` (try 4) ran every tool:
+
+```
+[1] parse_query
+      in:  anything in size S
+      out: {'description': 'anything', 'size': 'S', 'max_price': None}
+[2] search_listings (via MCP)
+      in:  {'description': 'anything', 'size': 'S', 'max_price': None}
+      out: 1 items: Knit Cardigan — Chunky Brown
+[3] select item
+      out: Knit Cardigan — Chunky Brown ($35.0, depop)
+      →    id lst_008 stored in session['selected_item']
+[4] suggest_outfit
+[5] create_fit_card
+      out: Finally scored this chunky brown knit cardigan on depop for just $35 and I am never taking it off. …
+```
+
+`cheap stuff under $10` (try 5) stopped, but at the wrong branch and with the wrong message:
+
+```
+- stopped early: yes — Nothing matched 'cheap stuff' under $10. Try: raise or drop the price limit; use fewer or broader words (e.g. 'dress' instead of 'designer ballgown').
+- search_results: 0
+
+[1] parse_query
+      out: {'description': 'cheap stuff', 'size': None, 'max_price': 10.0}
+[2] search_listings (via MCP)
+      out: [] (empty)
+[3] branch
+      →    search returned [] — stopping before suggest_outfit
 ```
 
 ---
 
 ## Verdicts and Diagnoses
 
-<!-- MET or MISSED per criterion against LAST UNIT's target, plus a sentence on
-     how you decided.
-
-     Then, for every miss: which of the four places it happened — a tool, the
-     loop's branch, the session, or the model's output — AND the mechanism.
-
-     Not a diagnosis:  "The fit card was bad."
-     A diagnosis:      "The fit card criterion missed on 2 of 5 items. Both had
-                        an empty brand field. My prompt puts the brand in the
-                        first sentence, so the card opened with a blank and read
-                        like a fragment. The tool worked; the prompt assumed a
-                        field that isn't always there."
-
-     Look for a pattern. Three misses on the same tool is one problem, not
-     three. -->
-
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | Matching query completes all three tools | 4 of 5 | **MET** (5/5) | All five runs of `vintage graphic tee under $30` reached `create_fit_card` and returned a non-empty card; no run stopped or crashed. |
+| 2 | Impossible query stops before `suggest_outfit` | 5 of 5 | **MET** (5/5) | All five runs stopped with the "Nothing matched … Try:" message, and no trace has a `suggest_outfit` step. 0 model calls. |
+| 3 | Selected item = first result, card names it | 5 of 5 | **MET** (5/5) | For each of the five queries, the id in `selected_item` matched the first search result, and the card contained title words and the platform. Held in 25/25 runs, not just the five scored. |
+| 4 | Fit card has the right price as `$N` | 4 of 5 | **MET** (5/5) | All five scored cards had `$` + the item's price. Across all 25 cards, one wrote "thirty bucks"; no round of five dropped below 4, so the target held every time, not just once. |
+| 5 | No-item query stops before search | 4 of 5 | **MISSED** (3/5) | 3 of the 5 queries took the no-item branch. Two didn't — and because the parser is deterministic, they failed on all five repeats, so this isn't bad luck. |
 
 **Diagnoses**
 
+**Criterion 5 — missed 2 of 5. Where: the loop's branch** (`agent.py::parse_query`,
+which feeds the no-item check in `run_agent`). **Mechanism:** the branch decides a
+query names no item when nothing is left after stripping filler words, and the
+filler list is hand-written. "anything", "stuff" and "cheap" aren't on it.
 
+- `anything in size S` → description `'anything'`. The branch let it through, and
+  `search_listings` did its job correctly: the Knit Cardigan's description ends
+  "Perfect for layering over **anything**", so it scored 1. The run then called
+  the model twice and produced an outfit and fit card for a cardigan the user
+  never asked for. Nothing errors, so from the outside this looks like a search
+  bug — it isn't; the search was given a word it should never have received.
+- `cheap stuff under $10` → description `'cheap stuff'`. Search found nothing,
+  so the *empty-search* branch caught it. The run stopped, but the message tells
+  the user to "use fewer or broader words" — wrong advice when the real problem
+  is that they never said what they want.
+
+**Pattern:** both misses are the same problem, not two. Every tool behaved to
+spec in every run; the only failure in 65 runs is a word list that's one step
+upstream of all three tools. It's exactly the risk I named in `criteria.md`
+when I set the target at 4 rather than 5 — I just underestimated how many
+everyday phrasings it would miss.
+
+**Criterion 4's one non-pass (not a miss of the target):** `create_fit_card`'s prompt
+asks for the price as `$30`, but at temperature 0.9 the model occasionally
+writes it out casually ("thirty bucks"). Same failure I saw in unit 3. It's
+model output, not the tool or the session, and at 1 in 25 it stays inside the
+4-of-5 target.
+
+**Were my targets too low?** Criterion 1 is: I set 4 of 5 to allow for keyword
+misses and rate-limit failures, and got 5/5 with three rate-limit waits along
+the way — the pacing in `generate.py` absorbs them. For the query this
+criterion names, 5 of 5 is the honest target. I'm leaving the original number
+in place because tightening a target after meeting it isn't what a revision
+is for, but it's the one I'd raise next time.
 
 ---
 
