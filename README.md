@@ -212,6 +212,28 @@ Can't write a fit card without an outfit — suggest_outfit returned nothing.
 - it gave me ideas with a sentence frame
 - i changed the wording
 
+**Unit 4**
+
+- I asked Claude (Claude Code) to do the unit 4 milestones in my repo and commit
+  each one: the MCP move, the failure handlers, the trace, the scenarios, both
+  eval runs and the write-up.
+- **Moment 3 — the key.** When the model call failed with `401 UNAUTHENTICATED`,
+  Claude said my key looked like an OAuth token rather than an API key because
+  it didn't start with `AIza`. That was wrong — the next `test.py` run passed
+  with a key in that same `AQ.` format. What I take from it: the format guess wasn't evidence; the passing
+  `test.py` line was.
+- **Moment 4 — the scorer.** Claude wrote a script to mark each try PASS/FAIL
+  from the run log. Its first pass said criteria 2 and 3 failed 25 of 25 —
+  because the branch note "stopping before suggest_outfit" contains the
+  string `suggest_outfit`, and the first-result check read the wrong field.
+  Reading the raw output showed both passing, and the script was fixed before
+  any verdict was written. A scorer is code too, and needs checking against
+  the output it scores.
+- **Moment 5 — the improvement.** After the fix made criterion 5 pass 25/25,
+  Claude tried five no-item phrasings the test never used; none hit the
+  branch. That went into the README instead of letting the 5/5 stand on its
+  own, since the fix was chosen by looking at the test's own queries.
+
 ---
 
 ## Stretch Feature — A Second Branch
@@ -499,52 +521,157 @@ $ python app.py ask 'designer ballgown size XXS under $5' --trace
 0 model calls this session
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+**On the MCP move:** `search_listings` is now registered on the FastMCP server
+in `mcp_server.py`. Its docstring is the published description: units
+(`max_price` in US dollars, inclusive), the whole-size matching rule, every
+returned field, and the empty case (`[]`, never null or an error).
+`python mcp_client.py` lists it with `description: string`, `size: string
+(optional)`, `max_price: number (optional)` — the same types as the Tool
+Inventory. In `agent.py::run_agent` the direct call became
+`call_tool("search_listings", {...})`; nothing else in the loop changed.
+**Nothing behaved differently:** for `vintage graphic tee` / `None` / `30.0` the
+MCP result and the direct call were `==` (same 10 dicts, same order), and the
+impossible query still came back as `[]`, so the empty-search branch fires
+exactly as before. The one visible cost is speed — `mcp_client.call_tool`
+starts the server for each call. I also added a handler for `MCPError`, so a
+server that won't start gives the user a message instead of a traceback.
 
+**Failure modes, triggered on purpose** (what the agent said each time):
 
+| Failure | How I triggered it | What the agent said |
+|---|---|---|
+| Empty search | `python app.py ask 'designer ballgown size XXS under $5'` | `Nothing matched 'designer ballgown' in size XXS under $5. Try: raise or drop the price limit; drop the size; use fewer or broader words (e.g. 'dress' instead of 'designer ballgown').` |
+| Empty wardrobe | `python app.py ask 'denim jacket under $50' --empty-wardrobe` | No crash, no empty string — general advice: `Outfit one: Lean into a casual streetwear vibe. Pair the cropped Wrangler jacket with high-waisted black wide-leg trousers and a fitted ribbed white tank top. Finish with chunky retro sneakers and a simple canvas tote bag…` (the handling already existed in `tools.py::suggest_outfit`; 5/5 in both eval runs) |
+| Model unavailable | A wrong key, on a query I hadn't run before: `GEMINI_API_KEY=AIza…(fake) python app.py ask 'leather bomber jacket under $70'` | `The search worked — it found Leather Belt — Brown, Braided ($12 on thredUp) — but the styling model couldn't be reached, so there's no outfit or fit card. The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com. Then run the same query again.` |
+
+Before the handler, the model-unavailable case ended the run with the bare
+exception line `ModelUnavailable: The model rejected your API key…` and threw
+away the search result. Now `run_agent` catches `ModelUnavailable` around
+steps 2–3, keeps what search found, and says what to do.
 
 ---
 
 ## The Improvement
 
-<!-- What you changed, why your diagnosis pointed at it, and the after-run in
-     the same table format. One change, measured properly.
+**What I changed:** one edit to `agent.py` — nine words added to `_FILLER`,
+the list `parse_query` strips before deciding whether the query names an item:
+`anything`, `everything`, `whatever`, `stuff`, `thing`, `things`, `item`,
+`items`, `cheap`. Nothing else changed between the two runs (commit `f7e03ef`).
 
-     `python run_eval.py --label after` -->
-
-**What I changed:**
-
-**Which failure it was meant to fix:**
+**Which failure it was meant to fix:** criterion 5. The diagnosis put both
+misses on the filler list: `anything` reached `search_listings` and matched a
+cardigan's description text, and `cheap stuff` fell through to the
+empty-search branch with the wrong advice. A tool fix or a prompt rewrite
+wouldn't have touched either — every tool did what it was asked.
 
 ### Run Log — After
 
+Full output: [`results/run_2026-10-13_2249_after.md`](results/run_2026-10-13_2249_after.md).
+Same scenarios, same five tries, caching off. Before is repeated here so the
+two sit side by side.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before `suggest_outfit` | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Selected item = first result, card names it | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) — 25/25 across all repeats |
+| 4. Fit card has the right price as `$N` | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) — 25/25 across all repeats |
+| 5. No-item query stops before `search_listings` | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) — 25/25 across all repeats |
 
-**Did it help, and how do I know:**
+| Criterion | Before | After |
+|---|---|---|
+| 1 | MET 5/5 | MET 5/5 |
+| 2 | MET 5/5 | MET 5/5 |
+| 3 | MET 5/5 (25/25) | MET 5/5 (25/25) |
+| 4 | MET 5/5 (24/25) | MET 5/5 (25/25) |
+| 5 | **MISSED 3/5 (15/25)** | **MET 5/5 (25/25)** |
+| Model calls for the whole run | 80 | 70 |
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+Criterion 5 after — the two queries that failed before (`agent.py::run_agent`,
+first try of each):
 
+```
+- stopped early: yes — Your search doesn't say what kind of item you want, so there was nothing to search for. I kept size S. Add an item and try again — e.g. 'graphic tee', 'denim jacket' or 'platform sneakers'.
+- search_results: 0
 
+[1] parse_query
+      in:  anything in size S
+      out: {'description': '', 'size': 'S', 'max_price': None}
+[2] branch
+      →    no item named in the query — stopping before search_listings
+```
+
+```
+- stopped early: yes — Your search doesn't say what kind of item you want, so there was nothing to search for. I kept under $10. Add an item and try again — e.g. 'graphic tee', 'denim jacket' or 'platform sneakers'.
+- search_results: 0
+
+[1] parse_query
+      in:  cheap stuff under $10
+      out: {'description': '', 'size': None, 'max_price': 10.0}
+[2] branch
+      →    no item named in the query — stopping before search_listings
+```
+
+**Did it help, and how do I know:** yes, on what the test measures — criterion 5
+went from 3/5 to 5/5, both failing queries now stop at step 2 with the right
+message, and the run made 10 fewer model calls because `anything in size S` no
+longer styles a cardigan nobody asked for. No other row moved: criteria 1–3
+were unchanged and criterion 4's 24/25 → 25/25 is the model's wording varying,
+not the fix (the fit-card prompt didn't change).
+
+But it helped less than the table suggests. I chose the words by looking at
+the two queries that failed, and those are the same queries the test runs, so
+the after-score is partly the fix being graded on its own answer key. I
+checked five no-item phrasings the test never used:
+
+```
+'something cute in size M'      -> 'cute'                  | ran all tools on Y2K Baby Tee — Butterfly Print
+'any clothes under $25'         -> 'any clothes'           | empty-search branch
+'what do you have in size L'    -> 'what do you have'      | empty-search branch
+'show me deals under $15'       -> 'deals'                 | empty-search branch
+'nothing too expensive, size S' -> 'nothing too expensive' | empty-search branch
+```
+
+0 of 5 reached the no-item branch. The criterion is met; the mechanism behind
+it — a hand-written word list — is not fixed.
 
 ---
 
 ## What's Still Broken
 
-<!-- For each criterion still missed: what you'd do, and why you stopped where
-     you did. "I ran out of time" is fine if it's true. Pretending nothing is
-     left is not. -->
+Every criterion is met after the change, so nothing here is a missed target —
+but three things are broken that the criteria don't catch.
 
+**1. The no-item branch still depends on a word list (criterion 5's real cause).**
+Unseen phrasings miss it 5 of 5 times (see above). What I'd do: flip the check
+around — instead of listing words that *aren't* items, require at least one
+word that *is* one (a category or garment word from the listings' `category`,
+`title` and `style_tags`, plus a short list of common garment nouns), and send
+anything else to the no-item message. I stopped because that is a second
+change to the same branch, and this unit allows one; it also needs care so
+`designer ballgown` — a real item the data doesn't have — still reaches the
+empty-search branch and criterion 2 doesn't break. I'd also rewrite
+criterion 5's five queries with phrasings I hadn't tuned against.
 
+**2. Search picks a weak match without saying the strong one was just over budget.**
+`'leather bomber jacket under $70'` selected a $12 leather **belt**: the only
+bomber is $75, so the price filter removes it, the remaining listings each
+match one word, and the cheapest wins the tie. The user gets an outfit built
+around a belt. What I'd do: in `run_agent`, if the top result matches fewer
+than half the description words, stop with a "closest match was X at $75 —
+raise the limit?" message instead of styling it. I found this while
+triggering the model-unavailable failure, after the runs were done; no
+criterion covers it, so I'd write one first.
+
+**3. Fit cards occasionally spell the price out.** 1 in 25 before, 0 in 25
+after, with no change to the prompt — so the after number is luck, not a fix.
+Within criterion 4's target, so I left it. If it mattered, I'd check the card
+in `create_fit_card` for `$<price>` and, if missing, retry once rather than
+reword the prompt again.
+
+**Criterion 1's target is too low.** 5/5 in both runs, with rate-limit waits
+absorbed by `generate.py`. I'd raise it to 5 of 5 next time — but not by
+editing it now, since that isn't a revision the brief allows.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
