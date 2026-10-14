@@ -64,6 +64,10 @@ _FILLER = {
     "i", "im", "i'm", "a", "an", "the", "some", "something", "for", "me", "my",
     "looking", "want", "need", "find", "show", "get", "please", "in", "with",
     "and", "or", "under", "below", "max", "up", "to", "less", "than", "size",
+    # Unit 4: words that sound like a request but name no item. "anything"
+    # matched a listing's description text and ran all three tools.
+    "anything", "everything", "whatever", "stuff", "thing", "things",
+    "item", "items", "cheap",
 }
 
 
