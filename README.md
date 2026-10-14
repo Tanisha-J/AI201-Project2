@@ -350,16 +350,58 @@ that produced it:
      the same length, your branch isn't working — and this is the fastest way
      anyone will ever find that out. -->
 
-**Happy path**
+**Happy path** — five steps; step 2 is the MCP call.
 
 ```
+$ python app.py ask 'vintage graphic tee under $30' --trace
 
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+      out: 10 items: Graphic Tee — 2003 Tour Bootleg Style, Vintage Band Tee — Faded Grey, Vintage Graphic Hoodie — Faded Black … +7 more
+[3] select item
+      in:  search_results[0]
+      out: Graphic Tee — 2003 Tour Bootleg Style ($24.0, depop)
+      →    id lst_006 stored in session['selected_item']
+[4] suggest_outfit
+      in:  new_item=lst_006, wardrobe=10 items
+      out: Outfit One: Grunge Street Wear the 2003 Tour Bootleg Style graphic tee with the baggy straight-leg jeans and b…
+[5] create_fit_card
+      in:  new_item=lst_006, outfit=Outfit One: Grunge Street Wear the 2003 Tour Bootleg Style graphic tee with the baggy…
+      out: scored this 2003 tour bootleg style graphic tee on depop for just $24 and it's officially my new uniform. goin…
+
+  Found:    Graphic Tee — 2003 Tour Bootleg Style — $24.0 on depop
+
+  Outfit:   Outfit One: Grunge Street
+Wear the 2003 Tour Bootleg Style graphic tee with the baggy straight-leg jeans and black combat boots. Layer the vintage black denim jacket on top and add the black crossbody bag for an effortless, edgy look. 
+
+Outfit Two: Contrast Casual
+Pair the graphic tee with the wide-leg khaki trousers and the chunky white sneakers. Cinch the waist using the brown leather belt and throw on the black cropped zip hoodie to wear open or tied around your shoulders for a balanced, modern everyday style.
+
+  Fit card: scored this 2003 tour bootleg style graphic tee on depop for just $24 and it's officially my new uniform. going for total grunge street energy today with baggy denim and beat-up combat boots. honestly obsessed with how effortlessly edgy it looks.
+
+2 model calls this session, 480 prompt + 166 output tokens
 ```
 
-**Empty search**
+**Empty search** — stops at step 3, before any model call.
 
 ```
+$ python app.py ask 'designer ballgown size XXS under $5' --trace
 
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      out: [] (empty)
+[3] branch
+      →    search returned [] — stopping before suggest_outfit
+
+  Nothing matched 'designer ballgown' in size XXS under $5. Try: raise or drop the price limit; drop the size; use fewer or broader words (e.g. 'dress' instead of 'designer ballgown').
+
+0 model calls this session
 ```
 
 **On the MCP move:** <!-- what changed in your code, and whether anything
