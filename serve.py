@@ -290,7 +290,11 @@ if __name__ == "__main__":
     # listen on through PORT, and it reaches your process from outside the
     # container — bind 127.0.0.1 and nothing but the container itself can
     # connect, which looks exactly like a broken app from the browser.
-    port = int(os.getenv("PORT", "5000"))
+    # 5050, not Flask's usual 5000: on macOS 12+ the AirPlay Receiver
+    # (ControlCenter) already listens on 5000 and answers every request with a
+    # 403, so `python serve.py` could not start there. Found while testing
+    # RUNNING.md on my own machine.
+    port = int(os.getenv("PORT", "5050"))
 
     # Never on by default. Flask's debugger executes code typed into a browser,
     # and a deployed app with it on is a stranger's shell. Set AI201_DEBUG=1 in

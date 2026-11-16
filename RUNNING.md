@@ -17,7 +17,7 @@ run path. Everything below it is the original unit 3–4 starter guide.
 | Dependencies | `requirements-lock.txt`: exact versions that were tested (Flask 3.1.3, google-genai 1.75.0, mcp 1.30.0, gunicorn 23.0.0, python-dotenv 1.1.1 and their dependencies). `requirements.txt` has the looser ranges |
 | Model files | **None.** The model is `gemini-3.5-flash-lite`, called over the Gemini API; nothing is downloaded. Installed packages take 74 MB |
 | Secrets | A Gemini API key in `.env` as `GEMINI_API_KEY=...` (free key from https://aistudio.google.com) |
-| Network | Outbound HTTPS to the Gemini API. The server listens on port 5000 (`PORT` overrides) |
+| Network | Outbound HTTPS to the Gemini API. The server listens on port **5050** (`PORT` overrides). Not 5000: on macOS the AirPlay Receiver already holds 5000 and answers with a 403 |
 
 ### From a clean checkout (macOS / Linux)
 
@@ -40,7 +40,7 @@ python serve.py
 Ask it something from a second terminal:
 
 ```bash
-curl -X POST http://localhost:5000/ask \
+curl -X POST http://localhost:5050/ask \
   -H 'Content-Type: application/json' \
   -d '{"query": "vintage graphic tee under $30"}'
 ```
@@ -61,6 +61,7 @@ The fields are documented above `_write_log()` in `serve.py` and in the README u
 
 ### Things worth knowing
 
+- **Tested from a clean clone** (2026-11-15). The packages, `test.py` and the server all worked first time on a spare port. The default port failed on my own Mac: AirPlay Receiver holds 5000, so `python serve.py` printed "Address already in use" and every curl came back 403 from AirPlay, not FitFindr. The default is now 5050.
 - **The cache is off in the server.** `serve.py` makes real model calls, so token counts are real. Set `AI201_CACHE=1` only for debugging.
 - **One request at a time.** A second request queues behind the first. The wait is logged as `queued_ms`.
 - **Rate limit.** The free tier allows 15 model requests per minute, and a completed run makes 2. More than about 7 completed requests a minute will pause in `generate.py`. The pause is logged inside each stage as `<stage>.rate_limit_wait`.
@@ -193,7 +194,7 @@ On your machine:
 
 ```bash
 python serve.py
-curl -X POST http://localhost:5000/ask \
+curl -X POST http://localhost:5050/ask \
   -H 'Content-Type: application/json' \
   -d '{"query": "vintage graphic tee under $30"}'
 ```
@@ -206,7 +207,7 @@ gunicorn serve:app
 
 | Thing | What it means |
 |---|---|
-| `PORT` | The host tells your app which port to listen on by setting this. Both `serve.py` and `gunicorn` read it, and `serve.py` falls back to `5000` on your machine. Don't hard-code a port |
+| `PORT` | The host tells your app which port to listen on by setting this. Both `serve.py` and `gunicorn` read it, and `serve.py` falls back to `5050` on your machine. Don't hard-code a port |
 | `POST /ask` | `{"query": "...", "wardrobe": {...}}` — wardrobe optional. Returns the session dict, `error` and all |
 | `GET /health` | Says `ok` if the app is awake |
 | It answers one request at a time | On purpose. A second request waits for the first to finish, and prints `[serve] another request is still running` while it waits. An MCP tool call starts a whole second Python process, and the free tier's 512 MB has no room for two of those at once — and `generate.py`'s rate-limit counting assumes one caller. The reasoning is written out in `serve.py` |
