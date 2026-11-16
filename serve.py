@@ -211,13 +211,22 @@ def _ask(record: dict):
                                                 example wardrobe the CLI uses.
     Out:  the session dict from run_agent(), as JSON.
     """
-    payload = request.get_json(silent=True) or {}
-    record["query"] = payload.get("query")
-    query = (payload.get("query") or "").strip()
+    # Capstone improvement (criterion C4): check the TYPES, not just presence.
+    # A JSON body can be a list, and "query" can be a number; both used to
+    # reach .get()/.strip() and crash with a 500 for what is the caller's
+    # mistake.
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    raw_query = payload.get("query")
+    record["query"] = raw_query
+    query = raw_query.strip() if isinstance(raw_query, str) else ""
     if not query:
         # 400 rather than a stack trace: the caller can act on this one.
         message = ("Send JSON with a 'query' field, e.g. "
                    '{"query": "vintage graphic tee under $30"}')
+        if raw_query is not None and not isinstance(raw_query, str):
+            message = f"'query' must be text, not {type(raw_query).__name__}. " + message
         record["outcome"] = "bad_request"
         record["error"] = message
         return jsonify({"error": message}), 400
