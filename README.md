@@ -719,4 +719,24 @@ editing it now, since that isn't a revision the brief allows.
 
 I'm adding the latency-breakdown stretch, which measures where the time goes across the stages of one run. `run_agent()` in [agent.py](agent.py) now records wall-clock milliseconds for each stage in `session["timings"]`: `parse_query`, `search_listings_mcp`, `suggest_outfit`, `create_fit_card` and `total`. Model stages also record how much of their time was spent asleep on the rate limiter (`<stage>.rate_limit_wait`, counted in [generate.py](generate.py)), so a slow model and a run that was just waiting its turn can be told apart. A failed stage still gets its time recorded. `python latency_breakdown.py` runs the five matching queries three times each with the cache off. It also times the same search in-process to show how much of the search stage is the MCP process start rather than the search itself. It writes the table to `results/latency_<timestamp>.md`.
 
-<!-- Paste the summary table from results/latency_*.md here once it's run with a real key. -->
+I ran `python latency_breakdown.py` on 2026-11-15: 15 runs (3 rounds × the 5 matching queries), cache off, an 8-second gap between runs, model `gemini-3.5-flash-lite`. All 15 runs completed all three tools. Full per-run table: [results/latency_2026-11-15_2231.md](results/latency_2026-11-15_2231.md).
+
+| Stage | Mean (ms) | Median | Min | Max | Share of mean total |
+|---|---|---|---|---|---|
+| parse_query | 0 | 0 | 0 | 2 | 0.0% |
+| search_listings_mcp | 962 | 554 | 335 | 3,086 | 10.4% |
+| suggest_outfit | 4,457 | 2,726 | 769 | 12,223 | 48.0% |
+| create_fit_card | 3,870 | 1,022 | 587 | 14,737 | 41.7% |
+| total | 9,290 | 8,668 | 1,820 | 26,038 | 100.0% |
+| *of which: rate_limit_wait* | 0 | 0 | 0 | 0 | — |
+| *search, in-process (no MCP)* | 2 | 2 | 1 | 3 | — |
+| *MCP overhead (mcp − in-process)* | 960 | 552 | 333 | 3,085 | — |
+
+What it shows:
+
+- **The two model calls are ~90% of the time** (48.0% + 41.7% of the mean total). Parsing is effectively free, and the loop code between stages added no measurable time (0 ms unaccounted).
+- **None of it was our rate limiter.** `rate_limit_wait` was 0 in all 15 runs, so the 8-second gap kept `generate.py` from ever pausing and no 429 backoff happened. The model time is time spent waiting on the API call itself. This measures it from the client side, so I can't split network time from the model's generation time.
+- **The model time varies a lot, and it doesn't depend on the query.** Round 1 was fast for every query (1.8–2.8 s total). Rounds 2 and 3 were much slower for the same five queries. `platform sneakers size 8` took 2.0 s in round 1, then 22.9 s and 26.0 s. Since identical inputs ranged over 13×, the spread comes from the service's response time, not prompt size or which item was found. That's why the mean (9.3 s) is above the median (8.7 s), and why the worst run was 14× the best.
+- **The search stage is almost all MCP overhead.** The search itself takes 2 ms in-process. Over MCP it averaged 962 ms, so 99.8% of that stage is starting `mcp_server.py` as a fresh Python process and connecting to it on every call. That overhead also wandered (335 ms to 3.1 s), slowest in round 2. Model calls never overlap with the search, so that variation is my laptop's process-startup time, not the network.
+
+If I had to make a run faster, the model calls are where the time is, but I can't control their spread. The one cost fully under my control is the ~1 s MCP startup, which a long-lived MCP connection would remove. It's 10% of the mean run and up to 3 s on a slow one.
