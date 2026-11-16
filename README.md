@@ -857,7 +857,66 @@ trial 3: 1914, 2139, 2480, 2531, 2688, 2857, 3503, 4414, 5514   (+ the silk slip
 
 **What was met, and whether the targets were too low.** C1 and C3 held in every trial, and C3 by a long way: bad-key requests took 363–885 ms against a 5,000 ms target. The 8.9 s cold start I worried about never happened again in 15 bad-key requests. The worst was the first request to each new server (~0.9 s), which fits a cold MCP process start, not a slow model. **C5 looks set too low, with one caveat.** The slowest of 29 completed runs was 5.6 s, nowhere near 10 s. But the latency stretch, run only ~15 minutes earlier, had 7 of 15 runs over 10 s and a 26 s worst case. So the API's speed swings a lot over short periods, and three trials in a quiet stretch don't show C5 is safe. I'd still tighten it to *9 of 10 under 6,000 ms*, which is what this service delivers when the API is healthy, and expect it to miss when the API is having a bad stretch. That's the moment I'd want the criterion to catch. I'd tighten C3 to *under 2,000 ms*. C2's ±250 ms was also loose, since every gap was 4–7 ms.
 
-<!-- IMPROVEMENT-SECTION -->
+**The Improvement**
+
+**What I changed:** request validation in `serve.py::_ask` (commit `acca64e`), aimed at the C4 diagnosis. It now checks the *types* before touching the body. A body that isn't a JSON object is treated as `{}`. A `query` that isn't a string is treated as empty and rejected with a 400 that names the problem (`'query' must be text, not int.`). Nothing else changed: no prompt, tool, agent or logging code. I picked this over the C2 miss because its mechanism was fully explained and it failed every trial, so a re-run could show whether the fix worked. The 503 hit once in 30 runs, so three re-runs would most likely never trigger it, and I'd have nothing to measure a retry fix against.
+
+**After the change**: same 24-request set, three new trials, nothing else touched. Evidence: [results/capstone_after.md](results/capstone_after.md); raw logs `results/capstone_logs/after_trial{1,2,3}.jsonl`.
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| C1. Every request leaves exactly one complete log record | 24 of 24 | 24/24 | 24/24 | 24/24 | **MET** |
+| C2. Logged numbers match (±250 ms, 2 calls, tokens > 0) | 10 of 10 | 10/10 | 10/10 | 10/10 | **MET** |
+| C3. Dead key: < 5 s, says "API key", logged `model_unavailable` | 5 of 5 | 5/5 | 5/5 | 5/5 | **MET** |
+| C4. Malformed requests get a 400, never a 500 | 5 of 5 | 5/5 | 5/5 | 5/5 | **MET** |
+| C5. Warm completed runs ≤ 10,000 ms | 9 of 10 | 10/10 | 9/10 | 9/10 | **MET** |
+
+Side by side:
+
+| Criterion | Before (runs 1/2/3) | After (runs 1/2/3) | What changed it |
+|---|---|---|---|
+| C1 | 24/24/24 | 24/24/24 | nothing |
+| C2 | 10/10/**9** | 10/10/10 | **luck, not the fix**: no 503 happened this time |
+| C3 | 5/5/5 | 5/5/5 | nothing |
+| C4 | **3/3/3** | **5/5/5** | **the fix** |
+| C5 | 10/10/9 | 10/**9**/**9** | slower API in two trials, not the fix |
+
+*C4 after (trial 1)*, from `capstone_trials.py::c4`, and the log lines `serve.py::_write_log` wrote for the two inputs that used to crash:
+```
+- PASS · malformed · `no body` · HTTP 400 · curl 2 ms · id `4d52095d74b2` · HTTP 400
+- PASS · malformed · `{}` · HTTP 400 · curl 2 ms · id `848aa9004d82` · HTTP 400
+- PASS · malformed · `{"query": ""}` · HTTP 400 · curl 2 ms · id `6eb8a49929dd` · HTTP 400
+- PASS · malformed · `{"query": 42}` · HTTP 400 · curl 2 ms · id `a338dc4959e9` · HTTP 400
+- PASS · malformed · `["denim jacket"]` · HTTP 400 · curl 2 ms · id `6af1249990e4` · HTTP 400
+
+{"ts": "2026-11-16T06:51:30.917+00:00", "request_id": "a338dc4959e9", "route": "/ask", "query": 42, "wardrobe": null, "status": 400, "outcome": "bad_request", "error": "'query' must be text, not int. Send JSON with a 'query' field, e.g. {\"query\": \"vintage graphic tee under $30\"}", ..., "duration_ms": 0.1, "model_calls": 0, "tokens_total": 0}
+{"ts": "2026-11-16T06:51:30.927+00:00", "request_id": "6af1249990e4", "route": "/ask", "query": null, "wardrobe": null, "status": 400, "outcome": "bad_request", "error": "Send JSON with a 'query' field, e.g. {\"query\": \"vintage graphic tee under $30\"}", ..., "duration_ms": 0.1, "model_calls": 0, "tokens_total": 0}
+```
+
+*C5 after*, logged `duration_ms` of completed runs, sorted:
+```
+trial 1: 2003, 2149, 2302, 2727, 3151, 3938, 4474, 4633, 5198, 7067
+trial 2: 2000, 2524, 2950, 3191, 3199, 3841, 4257, 5712, 8712, 11021
+trial 3: 2052, 2957, 3175, 4684, 4881, 4953, 5646, 5834, 7856, 17769
+```
+
+**Did it help?** For C4, yes, completely: the two inputs that crashed every trial now get a 400 with a message saying what to send, and nothing that passed before broke. It did nothing for anything else, and I'm not claiming the C2 change. Under the same code, the 503 simply didn't happen in these 30 runs, so the C2 bug is still there (see below). C5 still met, but it got worse without any code change. The two slow runs were all model time: the `timings` show no `rate_limit_wait`, and `create_fit_card` alone took 16.5 s in the 17.8 s run. The tail I said in the verdicts was missing from the before trials turned up here. That also settles the "tighten C5 to 6 s" idea: 6 s would have missed in two of three after trials.
+
+**What's Still Broken**
+
+All five criteria are met after the change, so no target is still missed. One miss from the before trials was never fixed, though, and two targets were too loose.
+
+**1. A temporary 503 from Gemini still kills the run (C2's before miss).** Unchanged: it passed after only because no 503 occurred. *What I'd do:* in `generate.py::generate`, treat `503`/`UNAVAILABLE` like a rate limit: retry with the existing backoff (`_retry_delay`, up to `MAX_RETRIES`) before raising `ModelUnavailable`. A bad key (`401`/"API key") should still fail at once, so C3 stays fast. To test it, I'd monkeypatch the Gemini client in a test so its first call raises a 503 on purpose, since waiting for Google to have a busy minute isn't a test. *Why I stopped:* the brief allows one improvement, and I chose the one I could prove. This is the first thing I'd do next (see below).
+
+**2. The latency tail is real and I don't control it.** C5 passed, but two after trials only just made 9 of 10, and the latency stretch had 7 of 15 runs over 10 s. Every slow run is time spent inside one Gemini call, not my code. *What I'd do:* set a per-call timeout around 8 s and retry once, which is the same retry path as #1, so it should be built together with it. *Why I stopped:* it changes the meaning of "completed" (a retried card is a different card), and that deserves its own criterion.
+
+**3. Targets I set too low.** C3 (bad key under 5 s): every one of 30 requests took 363 ms–1.2 s, so I'd tighten it to *under 2,000 ms*. C2's ±250 ms: every gap was 4–7 ms, so ±50 ms would still pass and would catch a timer that misses real work. C5 is *not* one I'd tighten after all; see The Improvement above.
+
+**4. Out of scope, still true:** the no-item word list from unit 4, and ~1 s of every request spent starting `mcp_server.py` (latency stretch below).
+
+**What I'd do next with another unit:** make `generate.py` retry `503 UNAVAILABLE` with backoff, tested by injecting a 503 on purpose. It's the only time in 60 matching-query runs that a valid request didn't get its fit card. The fix is ten lines in one function. And the same retry path is what a per-call timeout for the latency tail would need, so it unlocks the next fix too.
+
+
 
 
 
