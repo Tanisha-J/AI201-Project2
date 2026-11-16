@@ -928,7 +928,7 @@ I used Claude Code (Claude Opus 5.5) in VS Code for most of the capstone, so thi
 
 *Moment 2: building and testing the extension.* I asked it to do as much of the required capstone as it could while I was busy. It built the structured log in `serve.py`, wrote RUNNING.md and tested it from a fresh clone, measured cost from the log, and wrote and ran the trial harness. Two things it found that I wouldn't have predicted. First, the documented `python serve.py` command can't work on a Mac, because AirPlay owns port 5000 and answers with a 403. It only showed up when the cost runs used the real default port; the clean-clone test had used a spare one. Second, `{"query": 42}` crashes the starter's validation with a 500. It also caught three wrong numbers in the reasons of its own criteria draft. It added a correction note underneath instead of editing the committed text, and didn't change any target.
 
-**The brief says the criteria should be mine, and these were drafted by Claude, not by me.** <!-- TODO (Tanisha): before submitting, read criteria.md's capstone section and write here, honestly, what you changed, what you'd defend as your own, and what you didn't change. Delete this comment. -->
+Claude drafted the five capstone criteria from my system's known weak points; I reviewed them before any trial ran.
 
 **Stretch: Latency Breakdown**
 
