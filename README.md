@@ -715,6 +715,20 @@ editing it now, since that isn't a revision the brief allows.
 
 ## Capstone
 
+**What This Extends**
+
+This extends **FitFindr**, my unit 3–4 thrift-shopping agent: a regex query parser, `search_listings` over MCP, then two model calls (`suggest_outfit`, `create_fit_card`), with branches that stop early when the query names no item or nothing matches. Until now it only ever ran as a one-shot command (`python app.py ask`) and left no record behind. What's new is the operational layer. FitFindr now runs as a long-lived HTTP service (`python serve.py`). Every request, including rejected and failed ones, writes one structured JSON record to `logs/requests.jsonl`. That record holds the outcome, per-stage timings, the number of model calls and the tokens spent. So I can now answer "what happened on that request, and what did it cost?" without adding code first.
+
+**The Shape**
+
+**Shape A: deploy and instrument.** The extension is the run path (`serve.py` started by one documented command), the structured request log, and the numbers that come out of it (latency per stage, tokens and model calls per run). I'm running it locally with a committed log (Path B). The model is called over an API, so nothing is too big for a host, but a run record I can commit is the evidence that counts either way.
+
+Out of scope, on purpose:
+- **No hosting (Path A).** It's worth the same, and the time is better spent on testing.
+- **No fix for the no-item word list.** That's the unit 4 miss still listed in What's Still Broken above. It's agent logic, not the operational layer.
+- **No long-lived MCP connection.** The latency stretch below shows ~1 s per request goes to starting `mcp_server.py`, but removing that means rewriting `mcp_client.py`, which is a second extension.
+- **No changes to prompts, tools or the session.** The agent's behaviour should be identical to unit 4. Only the code around it changes.
+
 **Stretch: Latency Breakdown**
 
 I'm adding the latency-breakdown stretch, which measures where the time goes across the stages of one run. `run_agent()` in [agent.py](agent.py) now records wall-clock milliseconds for each stage in `session["timings"]`: `parse_query`, `search_listings_mcp`, `suggest_outfit`, `create_fit_card` and `total`. Model stages also record how much of their time was spent asleep on the rate limiter (`<stage>.rate_limit_wait`, counted in [generate.py](generate.py)), so a slow model and a run that was just waiting its turn can be told apart. A failed stage still gets its time recorded. `python latency_breakdown.py` runs the five matching queries three times each with the cache off. It also times the same search in-process to show how much of the search stage is the MCP process start rather than the search itself. It writes the table to `results/latency_<timestamp>.md`.
