@@ -792,7 +792,74 @@ Early stops are almost free. `no_item` and `bad_request` make 0 calls. `no_resul
 
 One caveat: `generate.py` counts `candidates_token_count` only. If the model spends "thinking" tokens, Google bills those as output, and they wouldn't be in my count. So $0.00057 is a floor, not a ceiling.
 
-<!-- RESULTS-SECTIONS -->
+**Run Log and Verdicts**
+
+The criteria are in [criteria.md](criteria.md) (capstone section, committed in `32aa530` before any trial ran). Each run is one trial of the 24-request set from `capstone_trials.py`, with a fresh server per trial and nothing changed in between. Full evidence for every scored request: [results/capstone_before.md](results/capstone_before.md). Raw logs: `results/capstone_logs/before_trial{1,2,3}.jsonl`.
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| C1. Every request leaves exactly one complete log record | 24 of 24 | 24/24 | 24/24 | 24/24 | **MET** |
+| C2. Logged numbers match (±250 ms, 2 calls, tokens > 0) | 10 of 10 | 10/10 | 10/10 | 9/10 | **MISSED** |
+| C3. Dead key: < 5 s, says "API key", logged `model_unavailable` | 5 of 5 | 5/5 | 5/5 | 5/5 | **MET** |
+| C4. Malformed requests get a 400, never a 500 | 5 of 5 | 3/5 | 3/5 | 3/5 | **MISSED** |
+| C5. Warm completed runs ≤ 10,000 ms | 9 of 10 | 10/10 | 10/10 | 9/10 | **MET** |
+
+Real output for each criterion. The scored lines come from `capstone_trials.py`'s `c1`–`c5` functions. The log lines were written by `serve.py::_write_log`, called from `serve.py::ask`.
+
+*C1 (trial 1).* Even the crash left exactly one record, with the same id as the `X-Request-ID` header the client got:
+```
+{"ts": "2026-11-16T06:46:03.075+00:00", "request_id": "2e74de670c75", "route": "/ask", "query": 42, "wardrobe": null, "status": 500, "outcome": "server_error", "error": "AttributeError: 'int' object has no attribute 'strip'", "selected_item": null, "fit_card_chars": null, "queued_ms": null, "agent_ms": null, "duration_ms": 0.1, "timings": null, "model_calls": 0, "cache_hits": 0, "tokens_prompt": 0, "tokens_output": 0, "tokens_total": 0}
+```
+
+*C2 (trial 1, then the trial 3 miss):*
+```
+- PASS · matching · `vintage graphic tee under $30` · HTTP 200 · curl 2,844 ms · id `e4fedc810bbc` · gap 5 ms, 675 tokens
+- PASS · matching · `90s track jacket in size M` · HTTP 200 · curl 2,803 ms · id `a0d8f93aa9cb` · gap 7 ms, 688 tokens
+- FAIL · matching · `silk slip dress in midi length under $40` · HTTP 200 · curl 1,837 ms · id `8c5175d85051` · outcome model_unavailable; model_calls 1; tokens_total 0
+```
+Its log record (trial 3):
+```
+{"request_id": "8c5175d85051", "query": "silk slip dress in midi length under $40", "status": 200, "outcome": "model_unavailable", "error": "The search worked — it found 90s Silk Slip Dress — Floral, Midi Length ($30 on depop) — but the styling model couldn't be reached, so there's no outfit or fit card. Couldn't reach the model: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} Then run the same query again.", "timings": {"parse_query": 0.0, "search_listings_mcp": 324.9, "suggest_outfit": 1507.7, "total": 1832.8}, "model_calls": 1, "tokens_total": 0, ...}
+```
+
+*C3 (trial 1):*
+```
+- PASS · bad_key · `denim jacket under $50` · HTTP 200 · curl 885 ms · id `d9209cc82c1f` · 885 ms
+- PASS · bad_key · `denim jacket under $50` · HTTP 200 · curl 387 ms · id `eafaec0e18e1` · 387 ms
+- PASS · bad_key · `denim jacket under $50` · HTTP 200 · curl 366 ms · id `6450ac056c42` · 366 ms
+- PASS · bad_key · `denim jacket under $50` · HTTP 200 · curl 363 ms · id `9b6e2d796554` · 363 ms
+- PASS · bad_key · `denim jacket under $50` · HTTP 200 · curl 399 ms · id `f6c004664016` · 399 ms
+```
+
+*C4 (trial 1; trials 2 and 3 identical):*
+```
+- PASS · malformed · `no body` · HTTP 400 · curl 2 ms · id `338297960898` · HTTP 400
+- PASS · malformed · `{}` · HTTP 400 · curl 2 ms · id `c62f8ef4cf8d` · HTTP 400
+- PASS · malformed · `{"query": ""}` · HTTP 400 · curl 2 ms · id `7b910a99de17` · HTTP 400
+- FAIL · malformed · `{"query": 42}` · HTTP 500 · curl 2 ms · id `2e74de670c75` · HTTP 500: AttributeError: 'int' object has no attribute 'strip'
+- FAIL · malformed · `["denim jacket"]` · HTTP 500 · curl 2 ms · id `00dddf27a6d4` · HTTP 500: AttributeError: 'list' object has no attribute 'get'
+```
+
+*C5:* the logged `duration_ms` of the completed runs, sorted:
+```
+trial 1: 2005, 2139, 2159, 2335, 2580, 2796, 2839, 3076, 3191, 5634
+trial 2: 1741, 1801, 2060, 2082, 2229, 2463, 2547, 3116, 3725, 4210
+trial 3: 1914, 2139, 2480, 2531, 2688, 2857, 3503, 4414, 5514   (+ the silk slip dress run that didn't complete)
+```
+
+**Diagnoses**
+
+**C4, missed 3/5 in every trial. Stage: request validation in `serve.py::ask`, before the agent runs. Mechanism:** the starter's check was `(payload.get("query") or "").strip()`. It assumes the body is a JSON *object* and `query` is a *string*, and it only tests that the query is non-empty. `{"query": 42}` reaches `.strip()` on an int, so it raises `AttributeError`. `["denim jacket"]` is valid JSON, so `get_json` returns a list, and `.get()` raises on a list. Both escape as 500s for what is the caller's mistake. The three passes are exactly the inputs where `or {}` / `or ""` saves it (no body, `{}`, empty string). It's deterministic, so it failed identically in all three trials. I expected this one from the build smoke test.
+
+**C2, missed in trial 3 (9/10). Stage: the model call's error handling in `generate.py::generate`, not the log. Mechanism:** Gemini answered `suggest_outfit` with **503 UNAVAILABLE ("experiencing high demand… usually temporary")**. `generate()` only retries errors that look like a rate limit (`429`, "resource exhausted", "rate limit"). Anything else raises `ModelUnavailable` on the first attempt. So a temporary overload was treated like a dead key: the run stopped after one call and the user was told the model "couldn't be reached". The log was right about all of it: 1 call, 0 tokens, `outcome: model_unavailable`, and the full 503 text. In the other 29 completed runs the logged time was within 5–8 ms of curl's, so the numbers themselves were accurate every time.
+
+**Pattern:** C2 and C4 are different stages, but they share a cause: an error type the code didn't expect gets the wrong treatment. In `serve.py`, an unexpected input *type* becomes a 500. In `generate.py`, an unexpected *temporary* error becomes a permanent failure. In both cases the log made the miss easy to diagnose, which is what the extension was for.
+
+**What was met, and whether the targets were too low.** C1 and C3 held in every trial, and C3 by a long way: bad-key requests took 363–885 ms against a 5,000 ms target. The cold-start 8.9 s I worried about didn't come back, because each trial's search warms up before the bad-key server starts. **C5 was set too low.** The slowest completed run in 29 was 5.6 s, nowhere near 10 s, and nothing like the 26 s tail in the latency stretch earlier that day. That run was a different hour, so the API's speed clearly varies by time of day. I'd tighten C5 to *9 of 10 under 6,000 ms*, and C3 to *under 2,000 ms*. C2's ±250 ms was also loose, since every gap was under 10 ms.
+
+<!-- IMPROVEMENT-SECTION -->
+
+
 
 **How I Used AI**
 
