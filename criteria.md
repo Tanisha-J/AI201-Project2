@@ -267,3 +267,9 @@ broken?". In my cost measurement 9 of 10 runs finished under 4.4 s (one took
 worst was 26 s, all of it inside the two model calls. 9 of 10 and not 10 of 10,
 because the slow tail comes from the Gemini API and I can't control it. Fewer than
 9 would mean a slow request is normal, not rare.
+
+> **Corrections to the reasons above, made before any trial ran (targets unchanged):**
+> - C5 says "the 5 s pause". The trial definition says 6 s, and 6 s is what's used.
+> - C3: the median successful run in my cost measurement was **2.7 s**, not 2.6 s.
+> - C5: in the latency stretch, **8** of 15 runs were under 10 s, not 9.
+> - C2: the session JSON holds up to 10 search results (`SEARCH_RESULT_LIMIT`), not all 40 listings.
