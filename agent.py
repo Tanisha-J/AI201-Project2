@@ -54,6 +54,10 @@ def new_session(query: str, wardrobe: dict) -> dict:
         # how much of each model stage was spent asleep on the rate limiter.
         # Only stages that actually ran appear. "total" is the whole run.
         "timings": {},
+        # Capstone: how the run ended, for the request log. One of
+        # completed / no_item / no_results / search_unavailable /
+        # model_unavailable. Set on every exit path of _run_agent.
+        "outcome": None,
     }
 
 
@@ -206,6 +210,7 @@ def _run_agent(query: str, wardrobe: dict) -> dict:
             "e.g. 'graphic tee', 'denim jacket' or 'platform sneakers'."
         )
         trace.step("branch", note="no item named in the query — stopping before search_listings")
+        session["outcome"] = "no_item"
         return session
 
     steps = 0
@@ -231,6 +236,7 @@ def _run_agent(query: str, wardrobe: dict) -> dict:
         )
         trace.step("search_listings (via MCP)", inputs=str(search_inputs),
                    returned=f"MCPError: {str(exc).splitlines()[0]}", note="stopping")
+        session["outcome"] = "search_unavailable"
         return session
     trace.step("search_listings (via MCP)", inputs=str(search_inputs),
                returned=session["search_results"])
@@ -239,6 +245,7 @@ def _run_agent(query: str, wardrobe: dict) -> dict:
     if not session["search_results"]:
         session["error"] = _no_results_message(parsed)
         trace.step("branch", note="search returned [] — stopping before suggest_outfit")
+        session["outcome"] = "no_results"
         return session
 
     session["selected_item"] = session["search_results"][0]
@@ -272,6 +279,7 @@ def _run_agent(query: str, wardrobe: dict) -> dict:
                    inputs=f"new_item={session['selected_item']['id']}, "
                           f"outfit={session['outfit_suggestion']}",
                    returned=session["fit_card"])
+        session["outcome"] = "completed"
     except ModelUnavailable as exc:
         failed = "suggest_outfit" if session["outfit_suggestion"] is None else "create_fit_card"
         item = session["selected_item"]
@@ -281,6 +289,7 @@ def _run_agent(query: str, wardrobe: dict) -> dict:
             f"there's no outfit or fit card. {exc} Then run the same query again."
         )
         trace.step(failed, returned=f"ModelUnavailable: {exc}", note="stopping")
+        session["outcome"] = "model_unavailable"
 
     return session
 

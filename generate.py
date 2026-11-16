@@ -163,6 +163,11 @@ def wait_seconds() -> float:
     return _wait_total
 
 
+def cache_hits() -> int:
+    """How many answers this process has served from the cache instead of the model."""
+    return _cache_hits
+
+
 def call_count() -> int:
     return _session_calls
 
