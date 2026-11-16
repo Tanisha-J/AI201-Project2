@@ -168,3 +168,102 @@ complete, and I know it isn't.
      A number you missed stays where it is, gets diagnosed, and gets a fix
      attempted. That's where the points are.
      ───────────────────────────────────────────────────────────────────────── -->
+
+---
+
+# Capstone acceptance criteria — FitFindr as a logged service
+
+Written for the capstone (shape A, deploy and instrument), **before any trial
+was run**. They are about `python serve.py` and its request log
+(`logs/requests.jsonl`), not the CLI. Criteria C1, C2, C3 and C5 are about the
+extension; C4 is about the HTTP layer the extension sits on.
+
+**One trial** = one fresh server with the real key, sent this fixed set of
+requests in order, with a 6 s pause after each completed run:
+
+- 10 matching queries: the five from `python app.py examples`, twice each
+- 2 impossible queries (`designer ballgown size XXS under $5`, `gold sequin gown size 2 under $3`)
+- 2 no-item queries (`size W30`, `under $30 size M`)
+- 5 malformed bodies: no body at all, `{}`, `{"query": ""}`, `{"query": 42}`, `["denim jacket"]`
+
+Then a second fresh server started with `GEMINI_API_KEY=not-a-real-key`, sent
+`denim jacket under $50` 5 times. That's 24 requests per trial. Each criterion
+runs three trials, changing nothing in between.
+
+---
+
+## C1. Every request leaves exactly one complete log record
+
+For all 24 requests in a trial, `logs/requests.jsonl` contains **exactly one**
+line whose `request_id` equals the response's `X-Request-ID` header. The line
+parses as JSON and has all 19 documented fields, with `status` matching the HTTP
+status the client got. **Target: 24 of 24, every trial.**
+
+**Why this target:** the log is the only way to find out later what happened.
+A request with no record, or two, is a failure I can't see. Writing the line
+is not random: it happens in a `finally` in `serve.py::ask`. So anything below
+24 means a code path skips the `finally` or writes twice, and that's a bug, not
+noise. The 500s and the bad-key requests are in the set on purpose, because
+failures are the records most likely to go missing and the ones I most need.
+
+## C2. The logged numbers match what actually happened
+
+For each of the 10 completed runs in a trial: the logged `duration_ms` is
+within **250 ms** of the client's measured time (curl's `time_total`), **and**
+`model_calls` is exactly 2, **and** `tokens_total` is greater than 0.
+**Target: 10 of 10, every trial.**
+
+**Why this target:** a log that is complete but wrong is worse than none,
+because I'd trust it. My cost number (657 tokens/run) and the latency stretch
+both come from these fields. 250 ms, not something tighter: the client's time
+also includes connecting over localhost and turning the session into JSON,
+which my timer doesn't cover. That should be milliseconds, but the session holds
+the 40-listing search results. Anything over 250 ms means the timer is missing
+real work, for example a queue wait or response building. Exactly 2 calls,
+because a completed run makes `suggest_outfit` + `create_fit_card` and nothing
+else. A third call would mean a hidden retry.
+
+## C3. A dead API key fails fast, says why, and is logged as a failure
+
+For each of the 5 bad-key requests in a trial: the response comes back in
+**under 5 seconds** (curl `time_total`). Its JSON `error` contains the words
+"API key". Its log record has `outcome` = `model_unavailable` and
+`tokens_total` = 0. **Target: 5 of 5, every trial.**
+
+**Why this target:** a bad or revoked key is the most likely way this
+service breaks for real, and nothing about it is visible from `/health`. The
+user should find out quickly and the log should make it obvious. 5 seconds,
+because in my cost measurement a successful run took a median of 2.6 s, and
+failing should never take longer than succeeding by much. A rejected key needs
+one MCP search (~0.3–1 s) and one refused model call. During the build I saw
+a single bad-key request take 8.9 s when the MCP search started cold (5.0 s), so
+I'm not certain the first request in a trial will make it. That's what this
+criterion is here to find out.
+
+## C4. Malformed requests get a 400, never a 500
+
+Each of the 5 malformed bodies gets HTTP **400** with a JSON body that has an
+`error` field saying what to send. **Target: 5 of 5, every trial.**
+
+**Why this target:** a 400 tells the caller they can fix it; a 500 says the
+server broke, which here would be a lie. Nothing about it is random, so one
+miss is a bug. I'm writing this one knowing a likely miss: the build smoke test
+showed `{"query": 42}` crashing with `AttributeError: 'int' object has no
+attribute 'strip'`. `serve.py`'s validation came from the starter and only
+checks that a query exists, not that it's a string. The target stays at 5 of 5
+because a 500 is wrong for every one of them.
+
+## C5. Warm requests come back quickly enough to wait for
+
+Of the 10 completed runs in a trial, at least **9 have a logged `duration_ms`
+of 10,000 ms or less**. Warm means the server is already running; the
+5 s pause per run keeps under the rate limit, so the rate-limit wait isn't
+what gets measured. **Target: 9 of 10, every trial.**
+
+**Why this target:** people asking for an outfit idea will wait a few seconds,
+not half a minute. Ten seconds is about where a spinner turns into "is it
+broken?". In my cost measurement 9 of 10 runs finished under 4.4 s (one took
+13.0 s). But in the latency stretch only 9 of 15 were under 10 s, and the
+worst was 26 s, all of it inside the two model calls. 9 of 10 and not 10 of 10,
+because the slow tail comes from the Gemini API and I can't control it. Fewer than
+9 would mean a slow request is normal, not rare.
