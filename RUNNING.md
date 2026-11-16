@@ -4,6 +4,70 @@ Everything about how the starter works and how to use it.
 
 ---
 
+## Capstone run path: local with logs (Path B)
+
+FitFindr runs as an HTTP service on your machine. This section is the whole
+run path. Everything below it is the original unit 3–4 starter guide.
+
+### What the environment needs
+
+| Thing | Value |
+|---|---|
+| Python | **3.13** (tested on 3.13.16, macOS arm64). 3.11+ should work, untested |
+| Dependencies | `requirements-lock.txt`: exact versions that were tested (Flask 3.1.3, google-genai 1.75.0, mcp 1.30.0, gunicorn 23.0.0, python-dotenv 1.1.1 and their dependencies). `requirements.txt` has the looser ranges |
+| Model files | **None.** The model is `gemini-3.5-flash-lite`, called over the Gemini API; nothing is downloaded. Installed packages take 74 MB |
+| Secrets | A Gemini API key in `.env` as `GEMINI_API_KEY=...` (free key from https://aistudio.google.com) |
+| Network | Outbound HTTPS to the Gemini API. The server listens on port 5000 (`PORT` overrides) |
+
+### From a clean checkout (macOS / Linux)
+
+```bash
+git clone https://github.com/Tanisha-J/AI201-Project2.git
+cd AI201-Project2
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-lock.txt
+cp .env.example .env            # then paste your key after GEMINI_API_KEY=
+python test.py                  # every line should PASS
+```
+
+### The one command that starts it
+
+```bash
+python serve.py
+```
+
+Ask it something from a second terminal:
+
+```bash
+curl -X POST http://localhost:5000/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "vintage graphic tee under $30"}'
+```
+
+`GET /health` returns `{"status": "ok"}`. Every response carries an `X-Request-ID` header that matches its line in the log.
+
+### Where the record goes
+
+Every `/ask` request appends one JSON line to **`logs/requests.jsonl`**, including
+400s, 500s and runs where the model couldn't be reached. Set `FITFINDR_LOG=path`
+to write somewhere else. Each request also prints one summary line on stderr:
+
+```
+  [log] 35ccd4b9fda9 200 completed 7,133 ms  calls=2 tokens=667
+```
+
+The fields are documented above `_write_log()` in `serve.py` and in the README under **Instrumentation**. The committed copy of the log from the capstone runs is `logs/requests.jsonl`.
+
+### Things worth knowing
+
+- **The cache is off in the server.** `serve.py` makes real model calls, so token counts are real. Set `AI201_CACHE=1` only for debugging.
+- **One request at a time.** A second request queues behind the first. The wait is logged as `queued_ms`.
+- **Rate limit.** The free tier allows 15 model requests per minute, and a completed run makes 2. More than about 7 completed requests a minute will pause in `generate.py`. The pause is logged inside each stage as `<stage>.rate_limit_wait`.
+- **The test harness** for the capstone criteria is `python capstone_trials.py --label before`. It starts its own servers (one with the real key, one with a deliberately bad key) and writes `results/capstone_<label>.md`.
+
+---
+
 ## Before your first class
 
 Setup happens **before class**. The [environment setup page](../pages/ide_setup)
