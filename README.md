@@ -710,3 +710,13 @@ editing it now, since that isn't a revision the brief allows.
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+
+---
+
+## Capstone
+
+**Stretch: Latency Breakdown**
+
+I'm adding the latency-breakdown stretch, which measures where the time goes across the stages of one run. `run_agent()` in [agent.py](agent.py) now records wall-clock milliseconds for each stage in `session["timings"]`: `parse_query`, `search_listings_mcp`, `suggest_outfit`, `create_fit_card` and `total`. Model stages also record how much of their time was spent asleep on the rate limiter (`<stage>.rate_limit_wait`, counted in [generate.py](generate.py)), so a slow model and a run that was just waiting its turn can be told apart. A failed stage still gets its time recorded. `python latency_breakdown.py` runs the five matching queries three times each with the cache off. It also times the same search in-process to show how much of the search stage is the MCP process start rather than the search itself. It writes the table to `results/latency_<timestamp>.md`.
+
+<!-- Paste the summary table from results/latency_*.md here once it's run with a real key. -->

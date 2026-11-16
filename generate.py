@@ -43,6 +43,10 @@ _prompt_tokens = 0
 _output_tokens = 0
 _client = None
 _budget_warned = False
+# Seconds spent asleep waiting on the rate limiter (pacing + 429 backoff).
+# Kept separate so a latency breakdown can tell "the model is slow" apart
+# from "we were waiting our turn". Capstone stretch: latency breakdown.
+_wait_total = 0.0
 
 
 class QuotaGuard(Exception):
@@ -118,6 +122,8 @@ def _wait_for_slot() -> None:
                 file=sys.stderr,
                 flush=True,
             )
+        global _wait_total
+        _wait_total += sleep_for
         time.sleep(sleep_for)
         _call_times[:] = [t for t in _call_times if time.monotonic() - t < 60.0]
 
@@ -150,6 +156,11 @@ def usage() -> str:
         f"{f', {_cache_hits} served from cache' if _cache_hits else ''}"
         f"{tokens}"
     )
+
+
+def wait_seconds() -> float:
+    """Total seconds this process has slept on the rate limiter so far."""
+    return _wait_total
 
 
 def call_count() -> int:
@@ -338,6 +349,8 @@ def generate(
                 file=sys.stderr,
                 flush=True,
             )
+            global _wait_total
+            _wait_total += backoff
             time.sleep(backoff)
 
     raise RuntimeError(

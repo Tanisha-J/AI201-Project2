@@ -14,8 +14,11 @@ Build and test your three tools in `tools.py` first. Then come here.
 """
 
 import re
+import time
+from contextlib import contextmanager
 
 import config
+import generate
 import trace
 from mcp_client import MCPError, call_tool
 from tools import suggest_outfit, create_fit_card
@@ -47,7 +50,26 @@ def new_session(query: str, wardrobe: dict) -> dict:
         "outfit_suggestion": None,   # what suggest_outfit returned
         "fit_card": None,            # what create_fit_card returned
         "error": None,               # set when the run ended early
+        # Capstone stretch — latency breakdown. Wall-clock ms per stage, plus
+        # how much of each model stage was spent asleep on the rate limiter.
+        # Only stages that actually ran appear. "total" is the whole run.
+        "timings": {},
     }
+
+
+@contextmanager
+def _timed(session: dict, stage: str):
+    """Record how long the block took, in ms, under session["timings"][stage]."""
+    wait_before = generate.wait_seconds()
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = (time.perf_counter() - start) * 1000
+        waited = (generate.wait_seconds() - wait_before) * 1000
+        session["timings"][stage] = round(elapsed, 1)
+        if waited:
+            session["timings"][f"{stage}.rate_limit_wait"] = round(waited, 1)
 
 
 # ── query parsing ─────────────────────────────────────────────────────────────
@@ -100,6 +122,14 @@ def parse_query(query: str) -> dict:
 # ── planning loop ─────────────────────────────────────────────────────────────
 
 def run_agent(query: str, wardrobe: dict) -> dict:
+    """Run the loop once and return the finished session. See _run_agent."""
+    start = time.perf_counter()
+    session = _run_agent(query, wardrobe)
+    session["timings"]["total"] = round((time.perf_counter() - start) * 1000, 1)
+    return session
+
+
+def _run_agent(query: str, wardrobe: dict) -> dict:
     """
     Run the loop once and return the finished session.
 
@@ -157,7 +187,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     session = new_session(query, wardrobe)
 
-    session["parsed"] = parse_query(query)
+    with _timed(session, "parse_query"):
+        session["parsed"] = parse_query(query)
     trace.step("parse_query", inputs=query, returned=str(session["parsed"]))
 
     # SECOND BRANCH (stretch): the query names no item, so there is nothing to
@@ -190,7 +221,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     }
     # search_listings runs on the MCP server (mcp_server.py), not in-process.
     try:
-        session["search_results"] = call_tool("search_listings", search_inputs)
+        with _timed(session, "search_listings_mcp"):
+            session["search_results"] = call_tool("search_listings", search_inputs)
     except MCPError as exc:
         session["error"] = (
             "The listings search couldn't be reached, so nothing was searched. "
@@ -220,9 +252,10 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         # Step 2 — outfit, built from the item stored in the session.
         steps += 1
         trace.check_iterations(steps)
-        session["outfit_suggestion"] = suggest_outfit(
-            session["selected_item"], session["wardrobe"]
-        )
+        with _timed(session, "suggest_outfit"):
+            session["outfit_suggestion"] = suggest_outfit(
+                session["selected_item"], session["wardrobe"]
+            )
         trace.step("suggest_outfit",
                    inputs=f"new_item={session['selected_item']['id']}, "
                           f"wardrobe={len(session['wardrobe'].get('items') or [])} items",
@@ -231,9 +264,10 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         # Step 3 — fit card, from the outfit and item stored in the session.
         steps += 1
         trace.check_iterations(steps)
-        session["fit_card"] = create_fit_card(
-            session["outfit_suggestion"], session["selected_item"]
-        )
+        with _timed(session, "create_fit_card"):
+            session["fit_card"] = create_fit_card(
+                session["outfit_suggestion"], session["selected_item"]
+            )
         trace.step("create_fit_card",
                    inputs=f"new_item={session['selected_item']['id']}, "
                           f"outfit={session['outfit_suggestion']}",
