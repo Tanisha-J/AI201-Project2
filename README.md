@@ -729,6 +729,69 @@ Out of scope, on purpose:
 - **No long-lived MCP connection.** The latency stretch below shows ~1 s per request goes to starting `mcp_server.py`, but removing that means rewriting `mcp_client.py`, which is a second extension.
 - **No changes to prompts, tools or the session.** The agent's behaviour should be identical to unit 4. Only the code around it changes.
 
+**Running It**
+
+**Path B, local with logs.** One command, `python serve.py`, starts FitFindr as an HTTP service on port 5050. [RUNNING.md](RUNNING.md) has the clean-checkout setup, the Python version, the pinned dependencies (`requirements-lock.txt`) and where the log goes. There are no model files. I tested it from a fresh `git clone` into an empty folder, and the setup and server worked first time. Then the documented command failed on my own Mac. AirPlay Receiver already listens on port 5000, so `python serve.py` printed "Address already in use" and every request got a 403 from AirPlay, not FitFindr. The default port is now 5050, and RUNNING.md says why.
+
+**Instrumentation**
+
+`serve.py` writes one JSON object per line to `logs/requests.jsonl` for **every** `/ask` request, written in a `finally` so a crash still leaves a record. Each record has:
+
+| Field | What it holds |
+|---|---|
+| `ts`, `request_id` | UTC arrival time; an id also returned as the `X-Request-ID` header |
+| `query`, `wardrobe` | what came in (raw, whatever its type); `example` or `custom` wardrobe |
+| `status`, `outcome`, `error` | HTTP status; how the run ended (`completed`, `no_item`, `no_results`, `search_unavailable`, `model_unavailable`, `bad_request`, `server_error`); the error text the caller saw |
+| `selected_item`, `fit_card_chars` | which listing the agent chose; how long the card was |
+| `queued_ms`, `agent_ms`, `duration_ms` | waiting for the one-at-a-time lock; inside `run_agent()`; the whole request |
+| `timings` | per-stage ms from `agent._timed()`, including `<stage>.rate_limit_wait` if `generate.py` paused |
+| `model_calls`, `cache_hits`, `tokens_prompt/output/total` | spend for this request, as the Gemini API reported it (the difference in `generate.py`'s counters across the run, measured inside the lock so no other request can mix in) |
+
+`outcome` is set by `run_agent` itself on each exit path (`agent.py`), so the log never has to guess from error text.
+
+The 15 records below are from one session on 2026-11-15, verbatim from `logs/requests.jsonl`. There are 10 completed runs (the five matching queries, twice each), then deliberate bad paths: an impossible query (`no_results`), a no-item query (`no_item`), an empty query (`400 bad_request`), a non-string query (`500 server_error`, a real bug, see the criteria), and one request to a second server started with a fake API key (`model_unavailable`).
+
+```jsonl
+{"ts": "2026-11-16T06:40:26.989+00:00", "request_id": "e987aaf179d0", "route": "/ask", "query": "vintage graphic tee under $30", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_006", "fit_card_chars": 249, "queued_ms": 0.0, "agent_ms": 2790.8, "duration_ms": 2791.6, "timings": {"parse_query": 0.1, "search_listings_mcp": 629.1, "suggest_outfit": 1536.9, "create_fit_card": 624.2, "total": 2790.8}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 474, "tokens_output": 165, "tokens_total": 639}
+{"ts": "2026-11-16T06:40:35.815+00:00", "request_id": "b7bfbfb82b59", "route": "/ask", "query": "vintage graphic tee under $30", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_006", "fit_card_chars": 220, "queued_ms": 0.0, "agent_ms": 4342.7, "duration_ms": 4343.7, "timings": {"parse_query": 0.0, "search_listings_mcp": 372.4, "suggest_outfit": 3117.6, "create_fit_card": 852.1, "total": 4342.6}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 471, "tokens_output": 156, "tokens_total": 627}
+{"ts": "2026-11-16T06:40:46.192+00:00", "request_id": "066b0baecc41", "route": "/ask", "query": "90s track jacket in size M", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_004", "fit_card_chars": 209, "queued_ms": 0.0, "agent_ms": 12977.2, "duration_ms": 12978.1, "timings": {"parse_query": 0.0, "search_listings_mcp": 392.3, "suggest_outfit": 11810.0, "create_fit_card": 773.7, "total": 12977.2}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 483, "tokens_output": 150, "tokens_total": 633}
+{"ts": "2026-11-16T06:41:05.208+00:00", "request_id": "b84a75ce0394", "route": "/ask", "query": "90s track jacket in size M", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_004", "fit_card_chars": 232, "queued_ms": 0.0, "agent_ms": 1912.6, "duration_ms": 1913.6, "timings": {"parse_query": 0.0, "search_listings_mcp": 412.0, "suggest_outfit": 838.5, "create_fit_card": 661.6, "total": 1912.6}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 500, "tokens_output": 173, "tokens_total": 673}
+{"ts": "2026-11-16T06:41:13.155+00:00", "request_id": "e4f707139b44", "route": "/ask", "query": "silk slip dress in midi length under $40", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_013", "fit_card_chars": 227, "queued_ms": 0.0, "agent_ms": 2682.6, "duration_ms": 2683.5, "timings": {"parse_query": 0.0, "search_listings_mcp": 415.3, "suggest_outfit": 1271.6, "create_fit_card": 995.0, "total": 2682.6}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 524, "tokens_output": 194, "tokens_total": 718}
+{"ts": "2026-11-16T06:41:21.877+00:00", "request_id": "ae863dcedce7", "route": "/ask", "query": "silk slip dress in midi length under $40", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_013", "fit_card_chars": 249, "queued_ms": 0.0, "agent_ms": 2420.5, "duration_ms": 2421.5, "timings": {"parse_query": 0.0, "search_listings_mcp": 400.9, "suggest_outfit": 1062.9, "create_fit_card": 956.2, "total": 2420.5}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 525, "tokens_output": 200, "tokens_total": 725}
+{"ts": "2026-11-16T06:41:30.342+00:00", "request_id": "9cddb73b4672", "route": "/ask", "query": "platform sneakers size 8", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_019", "fit_card_chars": 224, "queued_ms": 0.0, "agent_ms": 2289.0, "duration_ms": 2289.9, "timings": {"parse_query": 0.0, "search_listings_mcp": 396.7, "suggest_outfit": 1021.7, "create_fit_card": 870.1, "total": 2289.0}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 461, "tokens_output": 146, "tokens_total": 607}
+{"ts": "2026-11-16T06:41:38.668+00:00", "request_id": "73b3b202747a", "route": "/ask", "query": "platform sneakers size 8", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_019", "fit_card_chars": 197, "queued_ms": 0.0, "agent_ms": 2470.5, "duration_ms": 2471.3, "timings": {"parse_query": 0.0, "search_listings_mcp": 328.1, "suggest_outfit": 1201.9, "create_fit_card": 939.9, "total": 2470.5}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 480, "tokens_output": 159, "tokens_total": 639}
+{"ts": "2026-11-16T06:41:47.180+00:00", "request_id": "d990ac262e73", "route": "/ask", "query": "denim jacket under $50", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_007", "fit_card_chars": 266, "queued_ms": 0.0, "agent_ms": 3199.4, "duration_ms": 3200.3, "timings": {"parse_query": 0.0, "search_listings_mcp": 337.1, "suggest_outfit": 1213.1, "create_fit_card": 1648.5, "total": 3199.4}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 476, "tokens_output": 171, "tokens_total": 647}
+{"ts": "2026-11-16T06:41:56.417+00:00", "request_id": "63b41d82ae0b", "route": "/ask", "query": "denim jacket under $50", "wardrobe": "example", "status": 200, "outcome": "completed", "error": null, "selected_item": "lst_007", "fit_card_chars": 271, "queued_ms": 0.0, "agent_ms": 3598.8, "duration_ms": 3599.8, "timings": {"parse_query": 0.0, "search_listings_mcp": 352.7, "suggest_outfit": 1279.6, "create_fit_card": 1965.8, "total": 3598.8}, "model_calls": 2, "cache_hits": 0, "tokens_prompt": 485, "tokens_output": 177, "tokens_total": 662}
+{"ts": "2026-11-16T06:42:06.057+00:00", "request_id": "586d0abb67e4", "route": "/ask", "query": "designer ballgown size XXS under $5", "wardrobe": "example", "status": 200, "outcome": "no_results", "error": "Nothing matched 'designer ballgown' in size XXS under $5. Try: raise or drop the price limit; drop the size; use fewer or broader words (e.g. 'dress' instead of 'designer ballgown').", "selected_item": null, "fit_card_chars": null, "queued_ms": 0.0, "agent_ms": 339.9, "duration_ms": 340.5, "timings": {"parse_query": 0.0, "search_listings_mcp": 339.7, "total": 339.9}, "model_calls": 0, "cache_hits": 0, "tokens_prompt": 0, "tokens_output": 0, "tokens_total": 0}
+{"ts": "2026-11-16T06:42:06.409+00:00", "request_id": "245dfad51c58", "route": "/ask", "query": "anything in size S", "wardrobe": "example", "status": 200, "outcome": "no_item", "error": "Your search doesn't say what kind of item you want, so there was nothing to search for. I kept size S. Add an item and try again — e.g. 'graphic tee', 'denim jacket' or 'platform sneakers'.", "selected_item": null, "fit_card_chars": null, "queued_ms": 0.0, "agent_ms": 0.1, "duration_ms": 0.4, "timings": {"parse_query": 0.0, "total": 0.1}, "model_calls": 0, "cache_hits": 0, "tokens_prompt": 0, "tokens_output": 0, "tokens_total": 0}
+{"ts": "2026-11-16T06:42:06.420+00:00", "request_id": "b740f2e3187a", "route": "/ask", "query": "", "wardrobe": null, "status": 400, "outcome": "bad_request", "error": "Send JSON with a 'query' field, e.g. {\"query\": \"vintage graphic tee under $30\"}", "selected_item": null, "fit_card_chars": null, "queued_ms": null, "agent_ms": null, "duration_ms": 0.1, "timings": null, "model_calls": 0, "cache_hits": 0, "tokens_prompt": 0, "tokens_output": 0, "tokens_total": 0}
+{"ts": "2026-11-16T06:42:06.429+00:00", "request_id": "27d35b01a2fd", "route": "/ask", "query": 42, "wardrobe": null, "status": 500, "outcome": "server_error", "error": "AttributeError: 'int' object has no attribute 'strip'", "selected_item": null, "fit_card_chars": null, "queued_ms": null, "agent_ms": null, "duration_ms": 0.1, "timings": null, "model_calls": 0, "cache_hits": 0, "tokens_prompt": 0, "tokens_output": 0, "tokens_total": 0}
+{"ts": "2026-11-16T06:42:08.030+00:00", "request_id": "fda769cc836a", "route": "/ask", "query": "denim jacket under $50", "wardrobe": "example", "status": 200, "outcome": "model_unavailable", "error": "The search worked — it found Denim Jacket — Light Wash, Cropped ($42 on poshmark) — but the styling model couldn't be reached, so there's no outfit or fit card. The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com. Then run the same query again.", "selected_item": "lst_007", "fit_card_chars": null, "queued_ms": 0.0, "agent_ms": 966.2, "duration_ms": 966.7, "timings": {"parse_query": 0.1, "search_listings_mcp": 505.9, "suggest_outfit": 460.0, "total": 966.2}, "model_calls": 1, "cache_hits": 0, "tokens_prompt": 0, "tokens_output": 0, "tokens_total": 0}
+```
+
+**What It Costs**
+
+**Measured: 657 tokens and 2 model calls per completed run (mean of 10), about $0.00057 a run at paid-tier prices, and $0 on the free tier I actually use.**
+
+How I measured it: the 10 completed runs above, cache off (`serve.py` turns it off), each record's `tokens_prompt` and `tokens_output` as reported by the API in `response.usage_metadata`. That's what the run used, not an estimate.
+
+| Per completed run (n = 10) | Mean | Min | Max |
+|---|---|---|---|
+| Prompt tokens | 487.9 | 461 | 525 |
+| Output tokens | 169.1 | 146 | 200 |
+| Total tokens | 657 | 607 | 725 |
+| Model calls | 2 | 2 | 2 |
+| Wall-clock seconds | 3.87 | 1.91 | 12.98 |
+
+Converting to dollars uses Google's paid-tier price for `gemini-3.5-flash-lite`, $0.30 per 1M input and $2.50 per 1M output tokens. The token counts are measured; the price is the only number from a page.
+
+- Per run: 487.9 × $0.30/1M + 169.1 × $2.50/1M = $0.000146 + $0.000423 = **$0.00057**
+- **100 people a day, one request each:** 100 × $0.00057 = **$0.057 a day**, × 30 = **about $1.71 a month**. That's 100 × 2 = 200 model calls and 100 × 3.87 s ≈ 6.5 minutes of server time a day.
+
+Early stops are almost free. `no_item` and `bad_request` make 0 calls. `no_results` makes 0 calls but still costs ~0.3 s for the MCP search. `model_unavailable` makes 1 failed call that reports no tokens.
+
+One caveat: `generate.py` counts `candidates_token_count` only. If the model spends "thinking" tokens, Google bills those as output, and they wouldn't be in my count. So $0.00057 is a floor, not a ceiling.
+
 **Stretch: Latency Breakdown**
 
 I'm adding the latency-breakdown stretch, which measures where the time goes across the stages of one run. `run_agent()` in [agent.py](agent.py) now records wall-clock milliseconds for each stage in `session["timings"]`: `parse_query`, `search_listings_mcp`, `suggest_outfit`, `create_fit_card` and `total`. Model stages also record how much of their time was spent asleep on the rate limiter (`<stage>.rate_limit_wait`, counted in [generate.py](generate.py)), so a slow model and a run that was just waiting its turn can be told apart. A failed stage still gets its time recorded. `python latency_breakdown.py` runs the five matching queries three times each with the cache off. It also times the same search in-process to show how much of the search stage is the MCP process start rather than the search itself. It writes the table to `results/latency_<timestamp>.md`.
